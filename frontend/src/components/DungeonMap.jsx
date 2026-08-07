@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getTileAt } from '../logic';
 import { MONSTER_SPRITES } from '../monsterSprites';
+import { CLASSES } from '../data';
 
 const VIEW_W = 17;     // viewport width in tiles (odd = player centred)
 const VIEW_H = 11;     // viewport height in tiles
@@ -8,10 +9,11 @@ const HALF_W = 8;      // Math.floor(VIEW_W / 2)
 const HALF_H = 5;      // Math.floor(VIEW_H / 2)
 const CELL   = 44;     // px per tile
 
-// Hero class tile indices into tilemap_packed.png (matches PlayerCard.jsx)
-const CLASS_TILES = {
-  warrior: 87, mage: 84, witch: 99, rogue: 96, paladin: 88, ranger: 82,
-};
+// Hero class tile indices derived from data.js so they can never drift.
+// Classes with non-numeric tiles (ranger, frost_knight) fall back to warrior.
+const CLASS_TILES = Object.fromEntries(
+  CLASSES.map(c => [c.id, typeof c.tile === 'number' ? c.tile : 87])
+);
 
 // Minidungeon sprite path prefix
 const S = '/sprites/minidungeon';

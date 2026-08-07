@@ -28,8 +28,10 @@ def read_json(path):
 
 def write_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f)
+    os.replace(tmp, path)
 
 
 @app.get("/state")
@@ -40,6 +42,8 @@ def get_state():
 @app.post("/state")
 async def post_state(request: Request):
     data = await request.json()
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "invalid"}
     write_json(STATE_FILE, data)
     return {"ok": True}
 
@@ -55,5 +59,7 @@ def get_config():
 @app.post("/config")
 async def post_config(request: Request):
     data = await request.json()
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "invalid"}
     write_json(CONFIG_FILE, data)
     return {"ok": True}

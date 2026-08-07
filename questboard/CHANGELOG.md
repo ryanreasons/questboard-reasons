@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.12.6 - 2026-08-06
+
+### Fixed
+- **History tab per-player filter** now correctly matches entries across player name
+  changes. Filter buttons key on player ID; older entries without an ID fall back to
+  name matching so nothing is lost.
+- **Weekly quest reset label** now shows the actual configured week-start day (e.g.
+  "resets Monday") instead of the hardcoded "resets Sunday".
+- **Dungeon hero tiles** for Rogue and Paladin were swapped. They now derive directly
+  from `data.js` so the two sets of tile indices can never drift apart again. Ranger
+  and Frost Knight fall back to the Warrior tile rather than an incorrect value.
+- **Bounty gold input** no longer allows typing a reward higher than the player's
+  current gold balance.
+- **Backend state writes** are now atomic: data is written to a `.tmp` file and
+  renamed into place, so a crash mid-write cannot corrupt `state.json` or
+  `config.json`. Both POST endpoints also reject non-object payloads.
+
+### Changed
+- History entries now store `playerId` alongside `player` (name) so per-player
+  filtering stays correct even if a player is renamed.
+- History tab reversal and slice are now memoised so they don't re-run on every
+  unrelated render.
+
 ## 1.12.5 - 2026-08-06
 
 ### Added

@@ -69,7 +69,7 @@ export default function BountyBoard({ players, selectedPlayerId, bounties = [], 
                 min={1}
                 max={creatorGold}
                 value={form.goldReward}
-                onChange={e => setForm(f => ({ ...f, goldReward: Math.max(1, parseInt(e.target.value) || 1) }))}
+                onChange={e => setForm(f => ({ ...f, goldReward: Math.min(creatorGold, Math.max(1, parseInt(e.target.value) || 1)) }))}
               />
               <div className="bounty-form-hint">
                 You have {creatorGold}g — locked in until claimed or canceled

@@ -46,7 +46,9 @@ const ChoreCard = React.memo(function ChoreCard({ chore, isDone, claimedName, ca
   );
 });
 
-export default function ChoreGrid({ player, players, activeChores, dailyDone, weeklyDone, monthlyDone, onClaimChore, onUnclaimChore, bonusChoreId }) {
+const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+export default function ChoreGrid({ player, players, activeChores, dailyDone, weeklyDone, monthlyDone, onClaimChore, onUnclaimChore, bonusChoreId, weekStartDay = 1 }) {
   // Filtering only depends on the player and chore set, not on done-state, so it
   // shouldn't re-run on every chore tap (each tap re-renders this grid).
   const { daily, weekly, monthly } = useMemo(() => {
@@ -94,7 +96,7 @@ export default function ChoreGrid({ player, players, activeChores, dailyDone, we
           <div className="section-label">
             <TileSprite tile={131} display={12} />
             Weekly Quests
-            <span className="reset-info">— resets Sunday</span>
+            <span className="reset-info">— resets {DAY_NAMES[weekStartDay]}</span>
           </div>
           <div className="chores">
             {weekly.map(renderCard)}

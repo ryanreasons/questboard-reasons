@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import TileSprite from './TileSprite';
 
 function formatTime(ts) {
@@ -33,11 +33,16 @@ const TYPE_TILE = {
 export default function HistoryTab({ history, players, weeklyGold = {} }) {
   const [filter, setFilter] = useState(null);
 
-  const all = [...history].reverse().slice(0, 200);
+  const all = useMemo(() => [...history].reverse().slice(0, 200), [history]);
   const activity = all.filter(h => h.type !== 'reward');
   const rewards = all.filter(h => h.type === 'reward');
-  const hist = filter ? activity.filter(h => h.player === filter) : activity.slice(0, 60);
-  const rewardHist = filter ? rewards.filter(h => h.player === filter) : rewards;
+  const filterName = filter ? (players ?? []).find(p => p.id === filter)?.name ?? null : null;
+  const hist = filter
+    ? activity.filter(h => h.playerId === filter || (filterName && h.player === filterName))
+    : activity.slice(0, 60);
+  const rewardHist = filter
+    ? rewards.filter(h => h.playerId === filter || (filterName && h.player === filterName))
+    : rewards;
 
   return (
     <>
@@ -52,8 +57,8 @@ export default function HistoryTab({ history, players, weeklyGold = {} }) {
         {(players ?? []).map(p => (
           <button
             key={p.id}
-            className={`history-filter-btn${filter === p.name ? ' active' : ''}`}
-            onClick={() => setFilter(prev => prev === p.name ? null : p.name)}
+            className={`history-filter-btn${filter === p.id ? ' active' : ''}`}
+            onClick={() => setFilter(prev => prev === p.id ? null : p.id)}
           >
             {p.name}
           </button>

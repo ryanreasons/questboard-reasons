@@ -62,7 +62,7 @@ function BadgeTooltip({ badge }) {
   );
 }
 
-function PlayerCard({ player, gold, xp, isSelected, onClick, playerDamage, lastHit, streak, monster, prestige, badges, selectedTitleBadge, onSelectTitle, onPrestige, activePowerUps = [], overkillCharge = 0, storedPowerTokens = 0, projectedOverkillRewardId = null }) {
+function PlayerCard({ player, gold, xp, isSelected, onClick, playerDamage, lastHit, streak, monster, prestige, badges, selectedTitleBadge, onSelectTitle, onPrestige, activePowerUps = [], overkillCharge = 0, storedPowerTokens = 0, projectedOverkillRewardId = null, onSetMe }) {
   const tKey = todayKey();
   const { level: playerLevel } = getLevelFromXP(xp || 0);
   const m = resolveMonster(monster, player) || dateSeededMonster(player, tKey, playerLevel);
@@ -217,6 +217,13 @@ function PlayerCard({ player, gold, xp, isSelected, onClick, playerDamage, lastH
             title="Prestige: reset XP for permanent gold bonus"
           >⭐ PRESTIGE</button>
         )}
+        {onSetMe && (
+          <button
+            className="set-me-btn"
+            onClick={e => { e.stopPropagation(); onSetMe(); }}
+            title="Focus this device on your hero"
+          >📌 This is me</button>
+        )}
       </div>
       <div className={`monster-section${dead ? ' monster-dead' : ''}`}>
         <div className={`monster-name${dead ? ' defeated' : ''}`}>
@@ -327,7 +334,8 @@ function arePropsEqual(p, n) {
     && p.selectedTitleBadge === n.selectedTitleBadge
     && p.projectedOverkillRewardId === n.projectedOverkillRewardId
     && sameStrArray(p.badges, n.badges)
-    && JSON.stringify(p.activePowerUps) === JSON.stringify(n.activePowerUps);
+    && JSON.stringify(p.activePowerUps) === JSON.stringify(n.activePowerUps)
+    && (!!p.onSetMe === !!n.onSetMe);
 }
 
 export default React.memo(PlayerCard, arePropsEqual);

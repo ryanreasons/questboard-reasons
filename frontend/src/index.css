@@ -1101,6 +1101,34 @@ body.crt::after {
   50%       { box-shadow: 0 0 10px rgba(192,112,240,0.7); }
 }
 
+.set-me-btn {
+  font-family: 'PixelatedElegance', monospace;
+  font-size: 8px;
+  background: none;
+  border: 1px solid #3a4a6a;
+  color: #5a7aaa;
+  padding: 3px 6px;
+  cursor: pointer;
+  margin-top: 4px;
+  letter-spacing: 0.03em;
+}
+.set-me-btn:hover { border-color: #7ab8f5; color: #7ab8f5; }
+
+.focus-mode-bar {
+  text-align: center;
+  padding: 2px 0 6px;
+}
+.focus-mode-switch {
+  font-family: 'PixelatedElegance', monospace;
+  font-size: 9px;
+  background: none;
+  border: none;
+  color: #4a4a7a;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+.focus-mode-switch:hover { color: #8a8aae; }
+
 /* ── Badge row ── */
 .badge-row {
   display: flex;

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.12.5 - 2026-08-06
+
+### Added
+- **Weekday/weekend chore scheduling** (Settings → Quests): daily chores can now
+  be limited to weekdays only (**WD**), weekends only (**WE**), or every day
+  (**7d**, the default). The toggle appears on each daily chore row in the quest
+  picker and on the custom chore form. Chores hidden by the schedule are fully
+  excluded from the game loop — no phantom midnight penalties.
+- **Admin PIN** (Settings → Display): optionally lock Settings, Reset week, and
+  Import Save behind a 4-digit PIN to prevent kids from accidentally changing
+  configuration. Leave the field blank to disable the lock entirely. The PIN
+  unlocks for the browser session so parents aren't re-prompted on every tap.
+  Export Save remains unprotected (read-only action). This is a convenience lock,
+  not a security system.
+- **Personal device focus** ("This is me"): tap the **📌 This is me** button on
+  any hero card to pin that device to your hero. The board collapses to show only
+  your card, you're auto-selected, and your choice persists across page reloads
+  via `localStorage`. Tap **⇄ Switch player** (below your card) to return to the
+  full family view. No backend or account changes — purely device-local.
+
 ## 1.12.4 - 2026-06-28
 
 ### Added

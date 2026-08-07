@@ -180,11 +180,44 @@ function getProjectedOverkillReward(playerId) {
   return POWER_TOKEN_CHOICES[hash % POWER_TOKEN_CHOICES.length];
 }
 
+function PinModal({ adminPin, onSuccess, onCancel }) {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState(false);
+  function check() {
+    if (pin === adminPin) { onSuccess(); }
+    else { setError(true); setPin(''); }
+  }
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(5,5,18,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
+      <div style={{ background: '#13132a', border: '2px solid #3a3a6e', borderRadius: 4, padding: 28, minWidth: 240, textAlign: 'center' }}>
+        <div style={{ color: '#f5c870', fontSize: 14, marginBottom: 16, letterSpacing: 1 }}>ADMIN PIN</div>
+        <input
+          type="password"
+          inputMode="numeric"
+          maxLength={4}
+          value={pin}
+          onChange={e => { setPin(e.target.value.replace(/\D/g, '')); setError(false); }}
+          onKeyDown={e => e.key === 'Enter' && check()}
+          autoFocus
+          style={{ background: '#0d0d20', border: `1px solid ${error ? '#8a3a3a' : '#3a3a6e'}`, color: '#c8d0e0', padding: '8px 12px', fontSize: 20, width: '100%', boxSizing: 'border-box', textAlign: 'center', letterSpacing: 8, marginBottom: 8 }}
+          placeholder="••••"
+        />
+        {error && <div style={{ color: '#c08080', fontSize: 11, marginBottom: 8 }}>Incorrect PIN</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button style={{ flex: 1, background: '#2a2a4e', border: '1px solid #4a4a7e', color: '#c8d0e0', padding: 8, cursor: 'pointer', fontSize: 12 }} onClick={onCancel}>Cancel</button>
+          <button style={{ flex: 1, background: '#4a3a0a', border: '1px solid #f5c870', color: '#f5c870', padding: 8, cursor: 'pointer', fontSize: 12 }} onClick={check}>Unlock</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [config, setConfig] = useState(null);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [serverState, setServerState] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [myPlayerId, setMyPlayerId] = useState(() => localStorage.getItem('myPlayerId') || null);
   const [currentTab, setCurrentTab] = useState('chores');
   const [toast, setToast] = useState({ msg: '', visible: false });
   const [loading, setLoading] = useState(true);
@@ -193,12 +226,38 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [muted, setMutedState] = useState(isMuted());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(() => sessionStorage.getItem('adminUnlocked') === '1');
+  const [pinPrompt, setPinPrompt] = useState(null);
   const lastActionAt = useRef(0);
   const lastChoreAt = useRef(0);
   const comboRef = useRef(0);
   const [comboDisplay, setComboDisplay] = useState(0);
 
   const players = config?.players ?? [];
+
+  // Focused-device view: keep myPlayerId valid and auto-select on load.
+  useEffect(() => {
+    if (!myPlayerId) return;
+    if (players.find(p => p.id === myPlayerId)) {
+      setSelected(myPlayerId);
+    } else {
+      localStorage.removeItem('myPlayerId');
+      setMyPlayerId(null);
+    }
+  }, [myPlayerId, players]);
+
+  const setMyPlayer = useCallback((id) => {
+    localStorage.setItem('myPlayerId', id);
+    setMyPlayerId(id);
+    setSelected(id);
+  }, []);
+
+  const clearMyPlayer = useCallback(() => {
+    localStorage.removeItem('myPlayerId');
+    setMyPlayerId(null);
+  }, []);
+
+  const visiblePlayers = myPlayerId ? players.filter(p => p.id === myPlayerId) : players;
 
   const activeRewards = useMemo(() => {
     if (!config) return REWARDS;
@@ -212,12 +271,19 @@ export default function App() {
 
   const activeChores = useMemo(() => {
     if (!config) return [];
+    const todayIsWeekend = [0, 6].includes(new Date().getDay());
+    const isVisibleDay = (c) => {
+      if (c.freq !== 'daily') return true;
+      const days = c.days ?? 'both';
+      return days === 'both' || (days === 'weekday' && !todayIsWeekend) || (days === 'weekend' && todayIsWeekend);
+    };
     const enabled = new Set(config.enabledChores ?? []);
     const overrides = config.choreOverrides ?? {};
     const base = ALL_CHORES
       .filter(c => enabled.has(c.id))
-      .map(c => overrides[c.id] ? { ...c, ...overrides[c.id] } : c);
-    return [...base, ...(config.customChores ?? []).map(c => overrides[c.id] ? { ...c, ...overrides[c.id] } : c)];
+      .map(c => overrides[c.id] ? { ...c, ...overrides[c.id] } : c)
+      .filter(isVisibleDay);
+    return [...base, ...(config.customChores ?? []).map(c => overrides[c.id] ? { ...c, ...overrides[c.id] } : c).filter(isVisibleDay)];
   }, [config]);
 
   const bonusChoreId = useMemo(() => {
@@ -229,6 +295,15 @@ export default function App() {
     setToast({ msg, visible: true });
     setTimeout(() => setToast(t => ({ ...t, visible: false })), 2500);
   }, []);
+
+  const requireAdmin = useCallback((action) => {
+    if (!config?.adminPin || adminUnlocked) { action(); return; }
+    setPinPrompt({ onSuccess: () => { sessionStorage.setItem('adminUnlocked', '1'); setAdminUnlocked(true); setPinPrompt(null); action(); } });
+  }, [config?.adminPin, adminUnlocked]);
+
+  useEffect(() => {
+    if (!config?.adminPin) { sessionStorage.removeItem('adminUnlocked'); setAdminUnlocked(false); }
+  }, [config?.adminPin]);
 
   const saveState = useCallback(async (state) => {
     try {
@@ -991,33 +1066,33 @@ export default function App() {
                 <button onClick={() => { const next = !muted; setMuted(next); setMutedState(next); }}>
                   {muted ? '\ud83d\udd07' : '\ud83d\udd0a'} {muted ? 'Unmute' : 'Mute'}
                 </button>
-                <button onClick={() => { setMenuOpen(false); setShowSettings(true); }}><TileSprite tile={65} display={14} /> Settings</button>
-                <button onClick={() => { setMenuOpen(false); resetWeek(); }}><TileSprite tile={56} display={14} /> Reset week</button>
+                <button onClick={() => { setMenuOpen(false); requireAdmin(() => setShowSettings(true)); }}><TileSprite tile={65} display={14} /> Settings</button>
+                <button onClick={() => { setMenuOpen(false); requireAdmin(resetWeek); }}><TileSprite tile={56} display={14} /> Reset week</button>
                 <button onClick={() => { setMenuOpen(false); exportSave(); }}><TileSprite tile={91} display={14} /> Export Save</button>
-                <button onClick={() => { setMenuOpen(false); importSave(); }}><TileSprite tile={89} display={14} /> Import Save</button>
+                <button onClick={() => { setMenuOpen(false); requireAdmin(importSave); }}><TileSprite tile={89} display={14} /> Import Save</button>
               </div>
             )}
           </div>
         ) : (
           <>
             <button className="mute-btn" onClick={() => { const next = !muted; setMuted(next); setMutedState(next); }} title={muted ? 'Unmute sounds' : 'Mute sounds'}>{muted ? '\ud83d\udd07' : '\ud83d\udd0a'}</button>
-            <button className="reset-btn" onClick={() => setShowSettings(true)}><TileSprite tile={65} display={12} /> Settings</button>
-            <button className="reset-btn" onClick={resetWeek}><TileSprite tile={56} display={12} /> Reset week</button>
+            <button className="reset-btn" onClick={() => requireAdmin(() => setShowSettings(true))}><TileSprite tile={65} display={12} /> Settings</button>
+            <button className="reset-btn" onClick={() => requireAdmin(resetWeek)}><TileSprite tile={56} display={12} /> Reset week</button>
             <button className="reset-btn" onClick={exportSave}><TileSprite tile={91} display={12} /> Export Save</button>
-            <button className="reset-btn" onClick={importSave}><TileSprite tile={89} display={12} /> Import Save</button>
+            <button className="reset-btn" onClick={() => requireAdmin(importSave)}><TileSprite tile={89} display={12} /> Import Save</button>
           </>
         )}
       </div>
 
       <div className="players">
-        {players.map(p => (
+        {visiblePlayers.map(p => (
           <PlayerCard
             key={p.id}
             player={p}
             gold={state.gold[p.id] || 0}
             xp={state.xp?.[p.id] || 0}
             isSelected={selected === p.id}
-            onClick={() => selectPlayer(p.id)}
+            onClick={myPlayerId ? () => setSelected(p.id) : () => selectPlayer(p.id)}
             playerDamage={state.monsterDamage?.[p.id]}
             lastHit={lastHits[p.id]}
             streak={state.streaks?.[p.id] || 0}
@@ -1030,9 +1105,15 @@ export default function App() {
             storedPowerTokens={state.storedPowerTokens?.[p.id] || 0}
             projectedOverkillRewardId={getProjectedOverkillReward(p.id)}
             onPrestige={handlePrestige}
+            onSetMe={myPlayerId ? undefined : () => setMyPlayer(p.id)}
           />
         ))}
       </div>
+      {myPlayerId && (
+        <div className="focus-mode-bar">
+          <button className="focus-mode-switch" onClick={clearMyPlayer}>⇄ Switch player</button>
+        </div>
+      )}
 
       <Suspense fallback={<div className="no-select">Loading…</div>}>
       <div>
@@ -1095,6 +1176,7 @@ export default function App() {
     <div className="version-label">v{__APP_VERSION__}</div>
     {celebration && <Celebration onDismiss={() => setCelebration(false)} />}
     </div>
+    {pinPrompt && <PinModal adminPin={config.adminPin} onSuccess={pinPrompt.onSuccess} onCancel={() => setPinPrompt(null)} />}
     </>
   );
 }

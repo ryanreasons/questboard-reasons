@@ -23,6 +23,11 @@ const PLAYER_COLORS = [
 const WHO_CYCLE = ['all', 'adults', 'kids'];
 const WHO_LABEL = { all: 'everyone', adults: 'adults', kids: 'kids' };
 
+const DAYS_CYCLE = ['both', 'weekday', 'weekend'];
+const DAYS_COLOR = { both: '#5a5a8a', weekday: '#7ab8f5', weekend: '#f5c870' };
+const DAYS_LABEL = { both: '7d', weekday: 'WD', weekend: 'WE' };
+const DAYS_TITLE = { both: 'Every day — tap to limit to weekdays', weekday: 'Weekdays only — tap to limit to weekends', weekend: 'Weekends only — tap to show every day' };
+
 const REWARD_TIERS = [
   { label: 'QUICK', max: 15  },
   { label: 'MID',   max: 30  },
@@ -327,6 +332,7 @@ function ChoreSection({ players, enabledChores, onToggle, choreOverrides, onOver
     const who  = ov.who  ?? chore.who;
     const pts  = ov.pts  ?? chore.pts;
     const mode = ov.mode ?? chore.mode ?? 'party';
+    const days = ov.days ?? chore.days ?? 'both';
     const dim  = !isRelevant(who);
 
     return (
@@ -350,6 +356,13 @@ function ChoreSection({ players, enabledChores, onToggle, choreOverrides, onOver
           onClick={e => { e.stopPropagation(); onOverride(chore.id, { ...ov, pts: pts >= 6 ? 1 : pts + 1 }); }}
           style={{ background: 'none', border: '1px solid #3a3a5e', color: '#f5c870', fontSize: 10, padding: '2px 6px', cursor: 'pointer', minWidth: 34 }}
         >{pts}pts</button>
+        {chore.freq === 'daily' && (
+          <button
+            onClick={e => { e.stopPropagation(); const next = DAYS_CYCLE[(DAYS_CYCLE.indexOf(days) + 1) % DAYS_CYCLE.length]; onOverride(chore.id, { ...ov, days: next }); }}
+            style={{ background: 'none', border: '1px solid #3a3a5e', color: DAYS_COLOR[days], fontSize: 9, padding: '2px 5px', cursor: 'pointer', minWidth: 28 }}
+            title={DAYS_TITLE[days]}
+          >{DAYS_LABEL[days]}</button>
+        )}
         {isCustom && (
           <button onClick={e => { e.stopPropagation(); onRemoveCustom(chore.id); }}
             style={{ background: 'none', border: 'none', color: '#7a3a3a', cursor: 'pointer', fontSize: 14, padding: '0 4px' }}>✕</button>
@@ -400,6 +413,13 @@ function ChoreSection({ players, enabledChores, onToggle, choreOverrides, onOver
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
               </select>
+              {form.freq === 'daily' && (
+                <select style={{ ...S.input, flex: 1 }} value={form.days ?? 'both'} onChange={e => setForm(f => ({ ...f, days: e.target.value }))}>
+                  <option value="both">All days</option>
+                  <option value="weekday">Weekdays</option>
+                  <option value="weekend">Weekend</option>
+                </select>
+              )}
               <select style={{ ...S.input, flex: 1 }} value={form.mode} onChange={e => setForm(f => ({ ...f, mode: e.target.value }))}>
                 <option value="solo">ALL (everyone)</option>
                 <option value="party">1P (one person)</option>
@@ -793,7 +813,7 @@ function TabPowerUps({ powerUpSettings, onChange }) {
 }
 
 // ── Edit tab: Display ─────────────────────────────────────────────────────────
-function TabDisplay({ crtEnabled, onToggleCrt, uiScale, onChangeUiScale, animatedBg, onToggleAnimatedBg, weekStartDay, onChangeWeekStartDay, confirmChores, onToggleConfirmChores, displayOrientation, onChangeDisplayOrientation, vacation, onChangeVacation }) {
+function TabDisplay({ crtEnabled, onToggleCrt, uiScale, onChangeUiScale, animatedBg, onToggleAnimatedBg, weekStartDay, onChangeWeekStartDay, confirmChores, onToggleConfirmChores, displayOrientation, onChangeDisplayOrientation, vacation, onChangeVacation, adminPin, onChangeAdminPin }) {
   const vac = vacation ?? { enabled: false, start: '', end: '' };
   const dateInput = {
     ...S.input,
@@ -902,7 +922,7 @@ function TabDisplay({ crtEnabled, onToggleCrt, uiScale, onChangeUiScale, animate
           ))}
         </div>
       </div>
-      <div>
+      <div style={{ marginBottom: 24 }}>
         <div style={{ ...S.label, marginBottom: 6 }}>DISPLAY ORIENTATION</div>
         <p style={{ ...S.p, fontSize: 11 }}>Landscape is the default for kitchen tablets. Portrait stacks the layout vertically for fridge or tall screens.</p>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -917,6 +937,20 @@ function TabDisplay({ crtEnabled, onToggleCrt, uiScale, onChangeUiScale, animate
             </button>
           ))}
         </div>
+      </div>
+      <div>
+        <div style={{ ...S.label, marginBottom: 6 }}>ADMIN PIN</div>
+        <p style={{ ...S.p, fontSize: 11 }}>Lock Settings, Reset, and Import behind a 4-digit PIN. Leave blank for no lock.</p>
+        <input
+          type="password"
+          inputMode="numeric"
+          maxLength={4}
+          value={adminPin}
+          onChange={e => onChangeAdminPin(e.target.value.replace(/\D/g, ''))}
+          placeholder="No PIN set"
+          style={{ ...S.input, width: 120, letterSpacing: 6, fontSize: 18, textAlign: 'center' }}
+        />
+        {adminPin && <div style={{ color: '#5a5a7a', fontSize: 10, marginTop: 4 }}>{adminPin.length === 4 ? 'PIN set' : `${adminPin.length}/4 digits`}</div>}
       </div>
     </div>
   );
@@ -947,6 +981,7 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
   const [confirmChores, setConfirmChores] = useState(initialConfig?.confirmChores ?? false);
   const [displayOrientation, setDisplayOrientation] = useState(initialConfig?.displayOrientation ?? 'landscape');
   const [vacation, setVacation] = useState(initialConfig?.vacation ?? { enabled: false, start: '', end: '' });
+  const [adminPin, setAdminPin] = useState(initialConfig?.adminPin ?? '');
   const [powerUpSettings, setPowerUpSettings] = useState(
     initialConfig?.powerUpSettings ?? { ...DEFAULT_POWER_UP_SETTINGS }
   );
@@ -1023,6 +1058,7 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
       powerUpSettings,
       displayOrientation,
       vacation,
+      ...(adminPin ? { adminPin } : {}),
     });
   }
 
@@ -1098,6 +1134,7 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
                 confirmChores={confirmChores} onToggleConfirmChores={() => setConfirmChores(v => !v)}
                 displayOrientation={displayOrientation} onChangeDisplayOrientation={setDisplayOrientation}
                 vacation={vacation} onChangeVacation={setVacation}
+                adminPin={adminPin} onChangeAdminPin={setAdminPin}
               />
             )}
           </div>

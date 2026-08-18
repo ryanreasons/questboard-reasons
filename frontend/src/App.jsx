@@ -212,12 +212,186 @@ function PinModal({ adminPin, onSuccess, onCancel }) {
   );
 }
 
+function apiErrorMessage(payload, fallback) {
+  const detail = payload?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map(item => item?.msg)
+      .filter(Boolean);
+    if (messages.length) return messages.join('; ');
+  }
+  return fallback;
+}
+
+function AuthScreen({ mode, onLogin, onBootstrap, busy, error }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  const isBootstrap = mode === 'bootstrap';
+
+  async function submit(e) {
+    e.preventDefault();
+    if (busy) return;
+
+    if (isBootstrap) {
+      await onBootstrap({ username, password });
+    } else {
+      await onLogin({ username, password });
+    }
+  }
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'grid',
+      placeItems: 'center',
+      background: 'radial-gradient(circle at 50% 20%, #171735 0%, #080816 48%, #04040d 100%)',
+      color: '#c8d0e0',
+      padding: 24,
+      boxSizing: 'border-box',
+    }}>
+      <form
+        onSubmit={submit}
+        style={{
+          width: '100%',
+          maxWidth: 420,
+          background: 'rgba(19,19,42,0.96)',
+          border: '2px solid #3a3a6e',
+          borderRadius: 6,
+          padding: 26,
+          boxShadow: '0 18px 60px rgba(0,0,0,0.72)',
+        }}
+      >
+        <div style={{
+          color: '#f5c870',
+          fontSize: 26,
+          fontWeight: 'bold',
+          marginBottom: 6,
+          letterSpacing: 1,
+        }}>
+          ⚔ Questboard
+        </div>
+
+        <div style={{
+          color: '#8585a5',
+          fontSize: 13,
+          lineHeight: 1.45,
+          marginBottom: 22,
+        }}>
+          {isBootstrap
+            ? 'Create the first parent account for this kingdom.'
+            : 'Enter your account credentials to continue your quests.'}
+        </div>
+
+        <label style={{
+          display: 'block',
+          fontSize: 11,
+          color: '#9a9aba',
+          marginBottom: 6,
+          letterSpacing: 1,
+        }}>
+          USERNAME
+        </label>
+        <input
+          value={username}
+          onChange={e => setUsername(e.target.value)}
+          autoComplete="username"
+          maxLength={64}
+          autoFocus
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            marginBottom: 14,
+            background: '#0d0d20',
+            border: '1px solid #3a3a6e',
+            color: '#c8d0e0',
+            padding: '10px 12px',
+            fontSize: 14,
+          }}
+        />
+
+        <label style={{
+          display: 'block',
+          fontSize: 11,
+          color: '#9a9aba',
+          marginBottom: 6,
+          letterSpacing: 1,
+        }}>
+          PASSWORD
+        </label>
+        <input
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          autoComplete={isBootstrap ? 'new-password' : 'current-password'}
+          maxLength={256}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            marginBottom: isBootstrap ? 8 : 14,
+            background: '#0d0d20',
+            border: '1px solid #3a3a6e',
+            color: '#c8d0e0',
+            padding: '10px 12px',
+            fontSize: 14,
+          }}
+        />
+
+        {isBootstrap && (
+          <div style={{
+            color: '#777795',
+            fontSize: 11,
+            lineHeight: 1.4,
+            marginBottom: 14,
+          }}>
+            Use a passphrase of at least 15 characters. Spaces are allowed.
+          </div>
+        )}
+
+        <div style={{
+          color: '#d58d8d',
+          fontSize: 12,
+          minHeight: 18,
+          marginBottom: 12,
+        }}>
+          {error}
+        </div>
+
+        <button
+          type="submit"
+          disabled={busy || !username || !password}
+          style={{
+            width: '100%',
+            background: busy ? '#29293e' : '#4a3a0a',
+            border: '1px solid #f5c870',
+            color: '#f5c870',
+            padding: '10px 12px',
+            cursor: busy ? 'default' : 'pointer',
+            fontSize: 13,
+            fontWeight: 'bold',
+          }}
+        >
+          {busy
+            ? 'Please wait…'
+            : isBootstrap
+              ? 'Create Parent Account'
+              : 'Enter Questboard'}
+        </button>
+      </form>
+    </div>
+  );
+}
 export default function App() {
   const [config, setConfig] = useState(null);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [serverState, setServerState] = useState(null);
   const [selected, setSelected] = useState(null);
   const [myPlayerId, setMyPlayerId] = useState(() => localStorage.getItem('myPlayerId') || null);
+  const [authMode, setAuthMode] = useState('loading');
+  const [authUser, setAuthUser] = useState(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
   const [currentTab, setCurrentTab] = useState('chores');
   const [toast, setToast] = useState({ msg: '', visible: false });
   const [loading, setLoading] = useState(true);
@@ -259,6 +433,188 @@ export default function App() {
 
   const visiblePlayers = myPlayerId ? players.filter(p => p.id === myPlayerId) : players;
 
+  const resetAuthenticatedView = useCallback(() => {
+    setAuthUser(null);
+    setConfig(null);
+    setServerState(null);
+    setNeedsSetup(false);
+    setSelected(null);
+    setShowSettings(false);
+    setMenuOpen(false);
+    setLoading(false);
+    sessionStorage.removeItem('adminUnlocked');
+    setAdminUnlocked(false);
+  }, []);
+
+  const fetchCurrentUser = useCallback(async () => {
+    const response = await fetch(`${API}/auth/me`, {
+      credentials: 'same-origin',
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.user;
+    }
+
+    if (response.status === 401) return null;
+
+    throw new Error('Authentication service is unavailable.');
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initializeAuthentication() {
+      try {
+        const user = await fetchCurrentUser();
+        if (cancelled) return;
+
+        if (user) {
+          setAuthUser(user);
+          setAuthMode('authenticated');
+          return;
+        }
+
+        const response = await fetch(`${API}/auth/bootstrap-status`, {
+          credentials: 'same-origin',
+        });
+
+        if (!response.ok) {
+          throw new Error('Could not determine Questboard authentication status.');
+        }
+
+        const data = await response.json();
+        if (cancelled) return;
+
+        setAuthMode(data.needs_bootstrap ? 'bootstrap' : 'login');
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Authentication initialization failed', error);
+        setAuthError('Unable to contact the authentication service.');
+        setAuthMode('login');
+      }
+    }
+
+    initializeAuthentication();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchCurrentUser]);
+
+  const handleLogin = useCallback(async ({ username, password }) => {
+    setAuthBusy(true);
+    setAuthError('');
+
+    try {
+      const response = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(apiErrorMessage(data, 'Login failed.'));
+      }
+
+      setAuthUser(data.user);
+      setLoading(true);
+      setAuthMode('authenticated');
+    } catch (error) {
+      setAuthError(error.message || 'Login failed.');
+    } finally {
+      setAuthBusy(false);
+    }
+  }, []);
+
+  const handleBootstrap = useCallback(async ({ username, password }) => {
+    setAuthBusy(true);
+    setAuthError('');
+
+    try {
+      const response = await fetch(`${API}/auth/bootstrap`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(apiErrorMessage(data, 'Could not create the parent account.'));
+      }
+
+      setAuthUser(data.user);
+      setLoading(true);
+      setAuthMode('authenticated');
+    } catch (error) {
+      setAuthError(error.message || 'Could not create the parent account.');
+    } finally {
+      setAuthBusy(false);
+    }
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    setAuthBusy(true);
+
+    try {
+      const response = await fetch(`${API}/auth/logout`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+
+      if (!response.ok) {
+        throw new Error('Logout failed.');
+      }
+
+      resetAuthenticatedView();
+      setAuthError('');
+      setAuthMode('login');
+    } catch (error) {
+      console.error('Logout failed', error);
+      setAuthError('Could not log out. Please try again.');
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [resetAuthenticatedView]);
+
+  // The legacy state/config APIs remain transitional. Check the real server
+  // session periodically so an expired/revoked/disabled account returns to
+  // the login screen even while Questboard is already open.
+  useEffect(() => {
+    if (authMode !== 'authenticated') return undefined;
+
+    let cancelled = false;
+
+    const checkSession = async () => {
+      try {
+        const user = await fetchCurrentUser();
+        if (cancelled) return;
+
+        if (!user) {
+          resetAuthenticatedView();
+          setAuthMode('login');
+          return;
+        }
+
+        setAuthUser(user);
+      } catch (error) {
+        // A temporary network/backend failure should not destroy the local UI.
+        console.error('Session check failed', error);
+      }
+    };
+
+    const timer = setInterval(checkSession, 60_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [authMode, fetchCurrentUser, resetAuthenticatedView]);
   const activeRewards = useMemo(() => {
     if (!config) return REWARDS;
     const enabled = new Set(config.enabledRewards ?? REWARDS.map(r => r.id));
@@ -317,12 +673,22 @@ export default function App() {
     }
   }, []);
 
-  // Initial load: fetch config, then game state
+  // Load legacy Questboard data only after a real server-side identity exists.
   useEffect(() => {
+    if (authMode !== 'authenticated') return undefined;
+
+    let cancelled = false;
+
     async function init() {
+      setLoading(true);
+
       try {
-        const cfgRes = await fetch(`${API}/config`);
+        const cfgRes = await fetch(`${API}/config`, {
+          credentials: 'same-origin',
+        });
         const cfg = await cfgRes.json();
+
+        if (cancelled) return;
 
         if (cfg.needs_setup) {
           setNeedsSetup(true);
@@ -330,29 +696,48 @@ export default function App() {
           return;
         }
 
+        setNeedsSetup(false);
         setConfig(cfg);
 
-        const stateRes = await fetch(`${API}/state`);
+        const stateRes = await fetch(`${API}/state`, {
+          credentials: 'same-origin',
+        });
         const fetched = await stateRes.json();
-        const { state: after, changed, penaltyMsgs } = applyAutoResets(fetched, cfg.players, cfg.weekStartDay ?? 1, cfg.vacation);
+        const { state: after, changed, penaltyMsgs } = applyAutoResets(
+          fetched,
+          cfg.players,
+          cfg.weekStartDay ?? 1,
+          cfg.vacation,
+        );
 
         if (changed) {
           await fetch(`${API}/state`, {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(after),
           });
         }
 
+        if (cancelled) return;
+
         setServerState(after);
-        if (penaltyMsgs.length) setTimeout(() => showToast(penaltyMsgs[0]), 800);
+        if (penaltyMsgs.length) {
+          setTimeout(() => showToast(penaltyMsgs[0]), 800);
+        }
       } catch (e) {
         console.error('Init failed', e);
       }
-      setLoading(false);
+
+      if (!cancelled) setLoading(false);
     }
+
     init();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lastRawRef = useRef('');
   const loadState = useCallback(async () => {
@@ -892,21 +1277,56 @@ export default function App() {
     input.click();
   }, [showToast]);
 
-  const handleSetupComplete = useCallback(async (wizardConfig) => {
+  const handleSetupComplete = useCallback(async (wizardConfig, partyIdentity) => {
+    if (!partyIdentity?.players?.length) {
+      throw new Error('Family account setup is missing.');
+    }
+
+    // Provision user↔hero identities first. The payload is deliberately
+    // separate from wizardConfig so usernames/passwords are never written into
+    // config.json or state.json.
+    const identityResponse = await fetch(`${API}/auth/setup-party`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(partyIdentity),
+    });
+
+    if (!identityResponse.ok) {
+      const payload = await identityResponse.json().catch(() => ({}));
+      throw new Error(apiErrorMessage(payload, 'Could not create the family accounts.'));
+    }
+
     const freshState = makeDefaultState(wizardConfig.players);
-    const { state: after } = applyAutoResets(freshState, wizardConfig.players, wizardConfig.weekStartDay ?? 1, wizardConfig.vacation);
-    await Promise.all([
-      fetch(`${API}/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(wizardConfig),
-      }),
-      fetch(`${API}/state`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(after),
-      }),
-    ]);
+    const { state: after } = applyAutoResets(
+      freshState,
+      wizardConfig.players,
+      wizardConfig.weekStartDay ?? 1,
+      wizardConfig.vacation,
+    );
+
+    const configResponse = await fetch(`${API}/config`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(wizardConfig),
+    });
+
+    if (!configResponse.ok) {
+      throw new Error('Family accounts were created, but Questboard configuration could not be saved.');
+    }
+
+    const stateResponse = await fetch(`${API}/state`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(after),
+    });
+
+    if (!stateResponse.ok) {
+      throw new Error('Questboard configuration was saved, but the initial game state could not be saved.');
+    }
+
     setConfig(wizardConfig);
     setServerState(after);
     setNeedsSetup(false);
@@ -986,6 +1406,26 @@ export default function App() {
     document.body.classList.toggle('portrait', config?.displayOrientation === 'portrait');
   }, [config?.displayOrientation]);
 
+  if (authMode === 'loading') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text2)', fontSize: 14 }}>
+        Loading…
+      </div>
+    );
+  }
+
+  if (authMode === 'bootstrap' || authMode === 'login') {
+    return (
+      <AuthScreen
+        mode={authMode}
+        onLogin={handleLogin}
+        onBootstrap={handleBootstrap}
+        busy={authBusy}
+        error={authError}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text2)', fontSize: 14 }}>
@@ -1003,7 +1443,10 @@ export default function App() {
       <>
         {(config?.animatedBg !== false) && <DungeonBackground />}
         <Suspense fallback={null}>
-          <SetupWizard onComplete={handleSetupComplete} />
+          <SetupWizard
+            onComplete={handleSetupComplete}
+            currentUser={authUser}
+          />
         </Suspense>
       </>
     );
@@ -1050,6 +1493,27 @@ export default function App() {
           </button>
           <button className={`tab${currentTab === 'history' ? ' active' : ''}`} onClick={() => setCurrentTab('history')}>
             <TileSprite tile={116} display={14} /> History
+          </button>
+        </div>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 7,
+          marginLeft: 'auto',
+          color: '#8a8aaa',
+          fontSize: 11,
+          whiteSpace: 'nowrap',
+        }}>
+          <span title={`Signed in as ${authUser?.username || ''}`}>
+            @{authUser?.username}
+          </span>
+          <button
+            className="reset-btn"
+            onClick={handleLogout}
+            disabled={authBusy}
+            title="Log out"
+          >
+            Logout
           </button>
         </div>
         {isEpic ? (

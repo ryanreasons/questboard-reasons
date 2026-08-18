@@ -376,3 +376,142 @@ def test_secure_cookie_setting_is_configurable(auth_client, monkeypatch):
     monkeypatch.setenv("QUESTBOARD_SECURE_COOKIES", "true")
     response = bootstrap_parent(client)
     assert "secure" in response.headers["set-cookie"].lower()
+
+def test_setup_party_atomically_links_current_parent_and_creates_child(auth_client):
+    client, db_path = auth_client
+    parent = bootstrap_parent(client, "parent").json()["user"]
+
+    response = client.post(
+        "/auth/setup-party",
+        json={
+            "players": [
+                {
+                    "questboard_player_id": "player_0",
+                    "display_name": "Parent Hero",
+                    "use_current_user": True,
+                },
+                {
+                    "questboard_player_id": "player_1",
+                    "display_name": "Child Hero",
+                    "username": "child.hero",
+                    "password": CHILD_PASSWORD,
+                    "role": "child",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()["players"]
+    assert len(body) == 2
+    assert body[0]["user"]["id"] == parent["id"]
+    assert body[0]["player"]["questboard_player_id"] == "player_0"
+    assert body[1]["user"]["username"] == "child.hero"
+    assert body[1]["user"]["role"] == "child"
+    assert "password_hash" not in body[1]["user"]
+
+    with connect(str(db_path)) as conn:
+        players = conn.execute(
+            """
+            SELECT p.questboard_player_id, p.display_name, u.username, u.role
+            FROM players p
+            JOIN users u ON u.id = p.user_id
+            ORDER BY p.questboard_player_id
+            """
+        ).fetchall()
+        assert [tuple(row) for row in players] == [
+            ("player_0", "Parent Hero", "parent", "parent"),
+            ("player_1", "Child Hero", "child.hero", "child"),
+        ]
+
+        child_hash = conn.execute(
+            "SELECT password_hash FROM users WHERE username = 'child.hero'"
+        ).fetchone()[0]
+        assert child_hash != CHILD_PASSWORD
+        assert child_hash.startswith("$argon2")
+
+    me = client.get("/auth/me")
+    assert me.status_code == 200
+    assert me.json()["player"]["questboard_player_id"] == "player_0"
+
+
+def test_setup_party_rolls_back_everything_on_duplicate_username(auth_client):
+    client, db_path = auth_client
+    bootstrap_parent(client, "parent")
+
+    response = client.post(
+        "/auth/setup-party",
+        json={
+            "players": [
+                {
+                    "questboard_player_id": "player_0",
+                    "display_name": "Parent Hero",
+                    "use_current_user": True,
+                },
+                {
+                    "questboard_player_id": "player_1",
+                    "display_name": "Kid One",
+                    "username": "same.user",
+                    "password": CHILD_PASSWORD,
+                    "role": "child",
+                },
+                {
+                    "questboard_player_id": "player_2",
+                    "display_name": "Kid Two",
+                    "username": "same.user",
+                    "password": "a different long child passphrase",
+                    "role": "child",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 409
+
+    with connect(str(db_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM players").fetchone()[0] == 0
+        # Only the bootstrap parent survives the rolled-back setup transaction.
+        assert conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 1
+
+
+def test_setup_party_is_one_time_and_requires_parent(auth_client):
+    client, _ = auth_client
+    bootstrap_parent(client, "parent")
+
+    payload = {
+        "players": [
+            {
+                "questboard_player_id": "player_0",
+                "display_name": "Parent Hero",
+                "use_current_user": True,
+            }
+        ]
+    }
+
+    first = client.post("/auth/setup-party", json=payload)
+    assert first.status_code == 201, first.text
+
+    second = client.post("/auth/setup-party", json=payload)
+    assert second.status_code == 409
+
+    # A child account cannot invoke the family identity bootstrap operation.
+    parent_client = client
+    child_create = parent_client.post(
+        "/auth/users",
+        json={
+            "username": "child.only",
+            "password": CHILD_PASSWORD,
+            "role": "child",
+        },
+    )
+    assert child_create.status_code == 201
+
+    parent_client.post("/auth/logout")
+    login = parent_client.post(
+        "/auth/login",
+        json={"username": "child.only", "password": CHILD_PASSWORD},
+    )
+    assert login.status_code == 200
+
+    denied = parent_client.post("/auth/setup-party", json=payload)
+    assert denied.status_code == 403

@@ -222,18 +222,150 @@ function PlayerForm({ player, onChange }) {
 }
 
 // ── Step 2: Per-player setup (wizard) ─────────────────────────────────────────
-function StepPlayerSetup({ player, playerIdx, total, onChange, onNext, onBack, onDone }) {
-  const canAdvance = player.name.trim().length > 0;
+function StepPlayerSetup({
+  player,
+  playerIdx,
+  total,
+  identity,
+  currentUser,
+  onChange,
+  onIdentityChange,
+  onMakeCurrentUser,
+  onNext,
+  onBack,
+  onDone,
+}) {
+  const hasName = player.name.trim().length > 0;
+  const isMe = !!identity?.useCurrentUser;
+  const hasUsername = isMe || (identity?.username || '').trim().length > 0;
+  const password = identity?.password || '';
+  const passwordMatches = isMe || (
+    password.length >= 15
+    && password === (identity?.confirmPassword || '')
+  );
+  const hasRole = isMe || identity?.role === 'parent' || identity?.role === 'child';
+  const canAdvance = hasName && !!currentUser && hasUsername && passwordMatches && hasRole;
+
+  let validationMessage = '';
+  if (!hasName) validationMessage = 'Enter a hero name to continue.';
+  else if (!currentUser) validationMessage = 'A signed-in parent account is required.';
+  else if (!isMe && !hasUsername) validationMessage = 'Choose a login username for this hero.';
+  else if (!isMe && password.length < 15) validationMessage = 'Use a password or passphrase of at least 15 characters.';
+  else if (!isMe && password !== (identity?.confirmPassword || '')) validationMessage = 'The passwords do not match.';
+
   return (
     <div>
       <div style={S.h2}>
         Hero {playerIdx + 1} of {total}
         {player.name && <span style={{ color: '#f5c870' }}>  -  {player.name}</span>}
       </div>
+
       <PlayerForm player={player} onChange={onChange} />
+
+      <div style={{
+        marginTop: 18,
+        padding: 14,
+        background: '#0d0d20',
+        border: '1px solid #30305a',
+      }}>
+        <div style={{ ...S.label, color: '#f5c870', marginBottom: 8 }}>
+          QUESTBOARD ACCOUNT
+        </div>
+
+        {isMe ? (
+          <>
+            <div style={{ color: '#8dc447', fontSize: 12, marginBottom: 6 }}>
+              ✓ This hero is linked to your signed-in parent account.
+            </div>
+            <div style={{ color: '#777795', fontSize: 11 }}>
+              Login: @{currentUser?.username}
+            </div>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              style={{ ...S.btn, width: '100%', marginBottom: 12 }}
+              onClick={onMakeCurrentUser}
+            >
+              This hero is me (@{currentUser?.username})
+            </button>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.label}>ACCOUNT TYPE</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[
+                  { role: 'parent', label: 'Parent', desc: 'Can manage the family' },
+                  { role: 'child', label: 'Child', desc: 'Standard family account' },
+                ].map(option => (
+                  <button
+                    key={option.role}
+                    type="button"
+                    style={{
+                      ...(identity?.role === option.role ? S.btnPrimary : S.btn),
+                      flex: 1,
+                      padding: '9px 8px',
+                    }}
+                    onClick={() => onIdentityChange('role', option.role)}
+                  >
+                    <div style={{ fontWeight: 'bold' }}>{option.label}</div>
+                    <div style={{ fontSize: 9, opacity: 0.7 }}>{option.desc}</div>
+                  </button>
+                ))}
+              </div>
+              <div style={{ color: '#5a5a7a', fontSize: 9, marginTop: 5 }}>
+                Adult difficulty defaults to Parent; Kid difficulty defaults to Child. You can override it here.
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.label}>LOGIN USERNAME</label>
+              <input
+                style={S.input}
+                value={identity?.username || ''}
+                maxLength={64}
+                autoComplete="off"
+                onChange={e => onIdentityChange('username', e.target.value)}
+                placeholder={player.name ? player.name.toLowerCase().replace(/\s+/g, '.') : 'username'}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={S.label}>PASSWORD</label>
+                <input
+                  type="password"
+                  style={S.input}
+                  value={identity?.password || ''}
+                  maxLength={256}
+                  autoComplete="new-password"
+                  onChange={e => onIdentityChange('password', e.target.value)}
+                  placeholder="15+ characters"
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={S.label}>CONFIRM</label>
+                <input
+                  type="password"
+                  style={S.input}
+                  value={identity?.confirmPassword || ''}
+                  maxLength={256}
+                  autoComplete="new-password"
+                  onChange={e => onIdentityChange('confirmPassword', e.target.value)}
+                  placeholder="Repeat password"
+                />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
       {!canAdvance && (
-        <div style={{ color: '#c05a5a', fontSize: 11, marginTop: 4 }}>Enter a name to continue.</div>
+        <div style={{ color: '#c05a5a', fontSize: 11, marginTop: 10 }}>
+          {validationMessage}
+        </div>
       )}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
         <button style={S.btn} onClick={onBack}>← Back</button>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -957,12 +1089,27 @@ function TabDisplay({ crtEnabled, onToggleCrt, uiScale, onChangeUiScale, animate
 }
 
 // ── Main wizard ───────────────────────────────────────────────────────────────
-export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
+function defaultRoleForMode(mode) {
+  return mode === 'kids' ? 'child' : 'parent';
+}
+
+function makeIdentityDraft(player, useCurrentUser = false) {
+  return {
+    useCurrentUser,
+    role: defaultRoleForMode(player.mode),
+    username: '',
+    password: '',
+    confirmPassword: '',
+  };
+}
+
+export default function SetupWizard({ onComplete, onCancel, initialConfig, currentUser }) {
   const isEdit = !!initialConfig;
 
   const [step, setStep] = useState(isEdit ? 'tabs' : 0);
   const [activeTab, setActiveTab] = useState('party');
   const [players, setPlayers] = useState(initialConfig?.players ?? []);
+  const [accountSetup, setAccountSetup] = useState({});
   const [playerIdx, setPlayerIdx] = useState(0);
   const [enabledChores, setEnabledChores] = useState(
     () => new Set(initialConfig?.enabledChores ?? ALL_CHORES.map(c => c.id))
@@ -986,23 +1133,94 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
     initialConfig?.powerUpSettings ?? { ...DEFAULT_POWER_UP_SETTINGS }
   );
   const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState('');
 
   function handlePlayerCount(n) {
-    setPlayers(prev => {
-      const existing = initialConfig?.players ?? prev;
-      const result = [];
-      for (let i = 0; i < n; i++) {
-        if (i < existing.length) result.push({ ...existing[i], id: `player_${i}` });
-        else result.push(makeNewPlayer(result));
-      }
-      return result;
-    });
+    const existing = initialConfig?.players ?? players;
+    const result = [];
+
+    for (let i = 0; i < n; i++) {
+      if (i < existing.length) result.push({ ...existing[i], id: `player_${i}` });
+      else result.push(makeNewPlayer(result));
+    }
+
+    setPlayers(result);
+    setAccountSetup(Object.fromEntries(
+      result.map((player, idx) => [
+        player.id,
+        makeIdentityDraft(player, idx === 0),
+      ])
+    ));
     setPlayerIdx(0);
     setStep(2);
   }
 
   function updatePlayer(key, val) {
-    setPlayers(prev => prev.map((p, i) => i === playerIdx ? { ...p, [key]: val } : p));
+    const currentPlayer = players[playerIdx];
+
+    if (key === 'mode' && currentPlayer) {
+      setAccountSetup(prev => {
+        const draft = prev[currentPlayer.id];
+        if (!draft || draft.useCurrentUser) return prev;
+
+        // Keep an explicit role override. Only follow the difficulty default
+        // when the role still matches the old difficulty's default.
+        const oldDefault = defaultRoleForMode(currentPlayer.mode);
+        if (draft.role !== oldDefault) return prev;
+
+        return {
+          ...prev,
+          [currentPlayer.id]: {
+            ...draft,
+            role: defaultRoleForMode(val),
+          },
+        };
+      });
+    }
+
+    setPlayers(prev => prev.map(
+      (p, i) => i === playerIdx ? { ...p, [key]: val } : p
+    ));
+  }
+
+  function updateCurrentIdentity(key, val) {
+    const player = players[playerIdx];
+    if (!player) return;
+
+    setAccountSetup(prev => ({
+      ...prev,
+      [player.id]: {
+        ...(prev[player.id] || makeIdentityDraft(player)),
+        [key]: val,
+      },
+    }));
+  }
+
+  function makeCurrentUserHero() {
+    const selectedPlayer = players[playerIdx];
+    if (!selectedPlayer) return;
+
+    setAccountSetup(prev => {
+      const next = {};
+
+      players.forEach(player => {
+        const existing = prev[player.id] || makeIdentityDraft(player);
+        const useCurrentUser = player.id === selectedPlayer.id;
+
+        next[player.id] = {
+          ...existing,
+          useCurrentUser,
+          role: useCurrentUser
+            ? existing.role
+            : (existing.role || defaultRoleForMode(player.mode)),
+          username: useCurrentUser ? '' : (existing.username || ''),
+          password: useCurrentUser ? '' : (existing.password || ''),
+          confirmPassword: useCurrentUser ? '' : (existing.confirmPassword || ''),
+        };
+      });
+
+      return next;
+    });
   }
 
   function updatePlayerAt(idx, key, val) {
@@ -1020,7 +1238,13 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
   }
 
   function doneAddingPlayers() {
-    setPlayers(prev => prev.slice(0, playerIdx + 1));
+    const keptPlayers = players.slice(0, playerIdx + 1);
+    const keptIds = new Set(keptPlayers.map(player => player.id));
+
+    setPlayers(keptPlayers);
+    setAccountSetup(prev => Object.fromEntries(
+      Object.entries(prev).filter(([id]) => keptIds.has(id))
+    ));
     setStep(3);
   }
 
@@ -1042,7 +1266,9 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
 
   async function handleLaunch() {
     setLaunching(true);
-    await onComplete({
+    setLaunchError('');
+
+    const config = {
       players,
       enabledChores: [...enabledChores],
       choreOverrides,
@@ -1059,7 +1285,45 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
       displayOrientation,
       vacation,
       ...(adminPin ? { adminPin } : {}),
-    });
+    };
+
+    try {
+      if (isEdit) {
+        await onComplete(config);
+        return;
+      }
+
+      const identityPlayers = players.map(player => {
+        const identity = accountSetup[player.id];
+
+        if (!identity) {
+          throw new Error(`Missing account setup for ${player.name || player.id}.`);
+        }
+
+        if (identity.useCurrentUser) {
+          return {
+            questboard_player_id: player.id,
+            display_name: player.name.trim(),
+            use_current_user: true,
+          };
+        }
+
+        return {
+          questboard_player_id: player.id,
+          display_name: player.name.trim(),
+          use_current_user: false,
+          username: identity.username.trim(),
+          password: identity.password,
+          role: identity.role,
+        };
+      });
+
+      await onComplete(config, { players: identityPlayers });
+    } catch (error) {
+      console.error('Questboard setup failed', error);
+      setLaunchError(error?.message || 'Setup failed. Nothing was saved.');
+      setLaunching(false);
+    }
   }
 
   const currentCount = players.length || (initialConfig?.players?.length ?? 2);
@@ -1161,6 +1425,18 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
         )}
 
         <div style={S.body}>
+          {launchError && !launching && (
+            <div style={{
+              background: '#301818',
+              border: '1px solid #8a3a3a',
+              color: '#e0a0a0',
+              padding: 10,
+              fontSize: 11,
+              marginBottom: 12,
+            }}>
+              {launchError}
+            </div>
+          )}
           {launching ? (
             <div style={{ textAlign: 'center', padding: '40px 0', color: '#c8d0e0' }}>
               Preparing your adventure…
@@ -1174,7 +1450,11 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig }) {
               player={players[playerIdx]}
               playerIdx={playerIdx}
               total={players.length}
+              identity={accountSetup[players[playerIdx]?.id]}
+              currentUser={currentUser}
               onChange={updatePlayer}
+              onIdentityChange={updateCurrentIdentity}
+              onMakeCurrentUser={makeCurrentUserHero}
               onNext={nextPlayer}
               onBack={prevPlayer}
               onDone={doneAddingPlayers}

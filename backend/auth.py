@@ -357,6 +357,19 @@ class CreateUserRequest(BaseModel):
     role: Literal["parent", "child"] = "child"
 
 
+class PartyPlayerRequest(BaseModel):
+    questboard_player_id: str
+    display_name: str
+    use_current_user: bool = False
+    username: str | None = None
+    password: str | None = None
+    role: Literal["parent", "child"] | None = None
+
+
+class SetupPartyRequest(BaseModel):
+    players: list[PartyPlayerRequest]
+
+
 class ActiveRequest(BaseModel):
     is_active: bool
 
@@ -454,9 +467,33 @@ def logout(request: Request, response: Response):
     return {"ok": True}
 
 
+def _public_player(row: sqlite3.Row) -> dict[str, object]:
+    return {
+        "id": row["id"],
+        "questboard_player_id": row["questboard_player_id"],
+        "display_name": row["display_name"],
+    }
+
+
+def _fetch_player_by_user_id(conn: sqlite3.Connection, user_id: str):
+    return conn.execute(
+        """
+        SELECT id, user_id, questboard_player_id, display_name
+        FROM players
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+
 @router.get("/me")
 def me(user: AuthUser = Depends(get_current_user)):
-    return {"user": _public_user(user)}
+    with connect() as conn:
+        player = _fetch_player_by_user_id(conn, user.id)
+    return {
+        "user": _public_user(user),
+        "player": _public_player(player) if player is not None else None,
+    }
 
 
 @router.get("/users")
@@ -584,3 +621,121 @@ def reset_user_password(
             raise
 
     return {"ok": True}
+
+@router.post("/setup-party", status_code=201)
+def setup_party(
+    payload: SetupPartyRequest,
+    current_user: AuthUser = Depends(require_parent),
+):
+    """Create the initial one-to-one auth-user/player links.
+
+    This is intentionally a one-time family setup operation. Exactly one hero
+    must link to the already-authenticated parent; every other hero gets a new
+    parent/child login. Passwords are consumed only for hashing and are never
+    written to config/state JSON or returned to the client.
+    """
+    if not 1 <= len(payload.players) <= 20:
+        raise _http_422("party must contain between 1 and 20 players")
+
+    current_links = sum(1 for item in payload.players if item.use_current_user)
+    if current_links != 1:
+        raise _http_422(
+            "exactly one player must link to the current parent account"
+        )
+
+    normalized_players: list[tuple[PartyPlayerRequest, str, str]] = []
+    seen_player_ids: set[str] = set()
+
+    for item in payload.players:
+        questboard_player_id = unicodedata.normalize(
+            "NFC", item.questboard_player_id
+        ).strip()
+        display_name = unicodedata.normalize("NFC", item.display_name).strip()
+
+        if not questboard_player_id or len(questboard_player_id) > 128:
+            raise _http_422("invalid Questboard player id")
+        if not display_name or len(display_name) > 80:
+            raise _http_422("player display name must be 1-80 characters")
+        if questboard_player_id in seen_player_ids:
+            raise _http_422("duplicate Questboard player id")
+        seen_player_ids.add(questboard_player_id)
+
+        if item.use_current_user:
+            if item.username is not None or item.password is not None or item.role is not None:
+                raise _http_422(
+                    "current-user player must not include new account credentials"
+                )
+        else:
+            if item.username is None or item.password is None or item.role is None:
+                raise _http_422(
+                    "each additional player requires username, password, and role"
+                )
+
+        normalized_players.append((item, questboard_player_id, display_name))
+
+    created: list[dict[str, object]] = []
+
+    with connect() as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+
+            if conn.execute("SELECT COUNT(*) FROM players").fetchone()[0] != 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail="party identity setup already completed",
+                )
+
+            current_row = _fetch_user_by_id(conn, current_user.id)
+            if current_row is None or not bool(current_row["is_active"]):
+                raise HTTPException(status_code=401, detail="authentication required")
+
+            for item, questboard_player_id, display_name in normalized_players:
+                if item.use_current_user:
+                    user_row = current_row
+                else:
+                    user_row = _create_user(
+                        conn,
+                        username=item.username or "",
+                        password=item.password or "",
+                        role=item.role or "child",
+                    )
+
+                player_id = secrets.token_hex(16)
+                conn.execute(
+                    """
+                    INSERT INTO players (
+                        id, user_id, questboard_player_id, display_name
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        player_id,
+                        user_row["id"],
+                        questboard_player_id,
+                        display_name,
+                    ),
+                )
+
+                player_row = conn.execute(
+                    """
+                    SELECT id, user_id, questboard_player_id, display_name
+                    FROM players
+                    WHERE id = ?
+                    """,
+                    (player_id,),
+                ).fetchone()
+
+                created.append(
+                    {
+                        "player": _public_player(player_row),
+                        "user": _public_user(user_row),
+                    }
+                )
+
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+
+    return {"players": created}

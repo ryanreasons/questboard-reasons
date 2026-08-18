@@ -1,8 +1,17 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import json, os
 
+from database import initialize_database
+
 app = FastAPI()
+
+
+@app.on_event("startup")
+def _startup():
+    initialize_database()
 
 app.add_middleware(
     CORSMiddleware,

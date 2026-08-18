@@ -4,14 +4,22 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import json, os
 
-from database import initialize_database
+try:
+    from .database import initialize_database
+    from .auth import router as auth_router
+except ImportError:  # Docker runtime imports modules from /app directly.
+    from database import initialize_database
+    from auth import router as auth_router
 
-app = FastAPI()
 
-
-@app.on_event("startup")
-def _startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     initialize_database()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+app.include_router(auth_router)
 
 app.add_middleware(
     CORSMiddleware,

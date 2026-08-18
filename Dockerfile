@@ -20,7 +20,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY backend/main.py backend/database.py ./
+COPY backend/main.py backend/database.py backend/auth.py ./
 COPY backend/migrations ./migrations
 
 # Built frontend

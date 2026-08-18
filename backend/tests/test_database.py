@@ -43,7 +43,7 @@ def test_initialize_creates_schema_and_records_migration(tmp_path, monkeypatch):
             )
         ]
 
-        assert migrations == ["001_initial.sql"]
+        assert migrations == ["001_initial.sql", "002_auth.sql"]
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
@@ -59,7 +59,7 @@ def test_initialize_is_idempotent(tmp_path, monkeypatch):
             conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0]
-            == 1
+            == 2
         )
 
         assert conn.execute(
@@ -91,7 +91,7 @@ def test_reopen_preserves_schema_state(tmp_path, monkeypatch):
             conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0]
-            == 1
+            == 2
         )
 
 
@@ -332,5 +332,5 @@ def test_database_supports_relative_filename(tmp_path, monkeypatch):
             conn.execute(
                 "SELECT COUNT(*) FROM schema_migrations"
             ).fetchone()[0]
-            == 1
+            == 2
         )

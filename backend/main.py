@@ -1,15 +1,15 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import json, os
 
 try:
     from .database import initialize_database
-    from .auth import router as auth_router
+    from .auth import AuthUser, get_current_user, require_parent, router as auth_router
 except ImportError:  # Docker runtime imports modules from /app directly.
     from database import initialize_database
-    from auth import router as auth_router
+    from auth import AuthUser, get_current_user, require_parent, router as auth_router
 
 
 @asynccontextmanager
@@ -52,12 +52,17 @@ def write_json(path, data):
 
 
 @app.get("/state")
-def get_state():
+def get_state(_: AuthUser = Depends(get_current_user)):
     return read_json(STATE_FILE) or {}
 
 
 @app.post("/state")
-async def post_state(request: Request):
+async def post_state(
+    request: Request,
+    _: AuthUser = Depends(get_current_user),
+):
+    # Transitional compatibility endpoint. It now requires a real session,
+    # while fine-grained per-action authorization remains a later hardening step.
     data = await request.json()
     if not isinstance(data, dict):
         return {"ok": False, "error": "invalid"}
@@ -66,7 +71,7 @@ async def post_state(request: Request):
 
 
 @app.get("/config")
-def get_config():
+def get_config(_: AuthUser = Depends(get_current_user)):
     config = read_json(CONFIG_FILE)
     if config is None:
         return {"needs_setup": True}
@@ -74,7 +79,10 @@ def get_config():
 
 
 @app.post("/config")
-async def post_config(request: Request):
+async def post_config(
+    request: Request,
+    _: AuthUser = Depends(require_parent),
+):
     data = await request.json()
     if not isinstance(data, dict):
         return {"ok": False, "error": "invalid"}

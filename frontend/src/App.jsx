@@ -390,6 +390,7 @@ export default function App() {
   const [myPlayerId, setMyPlayerId] = useState(() => localStorage.getItem('myPlayerId') || null);
   const [authMode, setAuthMode] = useState('loading');
   const [authUser, setAuthUser] = useState(null);
+  const [authPlayer, setAuthPlayer] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
   const [currentTab, setCurrentTab] = useState('chores');
@@ -408,6 +409,20 @@ export default function App() {
   const [comboDisplay, setComboDisplay] = useState(0);
 
   const players = config?.players ?? [];
+  const isParent = authUser?.role === 'parent';
+  const linkedPlayerId = authPlayer?.questboard_player_id ?? null;
+
+  // Child accounts are automatically bound to the hero linked by the server.
+  // The rest of the family remains visible, but only the linked hero is
+  // selectable/actionable from the child UI.
+  useEffect(() => {
+    if (authUser?.role !== 'child' || !linkedPlayerId) return;
+    if (!players.some(player => player.id === linkedPlayerId)) return;
+
+    localStorage.removeItem('myPlayerId');
+    setMyPlayerId(null);
+    setSelected(linkedPlayerId);
+  }, [authUser?.role, linkedPlayerId, players]);
 
   // Focused-device view: keep myPlayerId valid and auto-select on load.
   useEffect(() => {
@@ -431,10 +446,11 @@ export default function App() {
     setMyPlayerId(null);
   }, []);
 
-  const visiblePlayers = myPlayerId ? players.filter(p => p.id === myPlayerId) : players;
+  const visiblePlayers = myPlayerId && isParent ? players.filter(p => p.id === myPlayerId) : players;
 
   const resetAuthenticatedView = useCallback(() => {
     setAuthUser(null);
+    setAuthPlayer(null);
     setConfig(null);
     setServerState(null);
     setNeedsSetup(false);
@@ -446,14 +462,13 @@ export default function App() {
     setAdminUnlocked(false);
   }, []);
 
-  const fetchCurrentUser = useCallback(async () => {
+  const fetchCurrentIdentity = useCallback(async () => {
     const response = await fetch(`${API}/auth/me`, {
       credentials: 'same-origin',
     });
 
     if (response.ok) {
-      const data = await response.json();
-      return data.user;
+      return response.json();
     }
 
     if (response.status === 401) return null;
@@ -466,11 +481,12 @@ export default function App() {
 
     async function initializeAuthentication() {
       try {
-        const user = await fetchCurrentUser();
+        const identity = await fetchCurrentIdentity();
         if (cancelled) return;
 
-        if (user) {
-          setAuthUser(user);
+        if (identity) {
+          setAuthUser(identity.user);
+          setAuthPlayer(identity.player);
           setAuthMode('authenticated');
           return;
         }
@@ -500,7 +516,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [fetchCurrentUser]);
+  }, [fetchCurrentIdentity]);
 
   const handleLogin = useCallback(async ({ username, password }) => {
     setAuthBusy(true);
@@ -520,7 +536,13 @@ export default function App() {
         throw new Error(apiErrorMessage(data, 'Login failed.'));
       }
 
-      setAuthUser(data.user);
+      const identity = await fetchCurrentIdentity();
+      if (!identity) {
+        throw new Error('Login succeeded but the account identity could not be loaded.');
+      }
+
+      setAuthUser(identity.user);
+      setAuthPlayer(identity.player);
       setLoading(true);
       setAuthMode('authenticated');
     } catch (error) {
@@ -528,7 +550,7 @@ export default function App() {
     } finally {
       setAuthBusy(false);
     }
-  }, []);
+  }, [fetchCurrentIdentity]);
 
   const handleBootstrap = useCallback(async ({ username, password }) => {
     setAuthBusy(true);
@@ -549,6 +571,7 @@ export default function App() {
       }
 
       setAuthUser(data.user);
+      setAuthPlayer(null);
       setLoading(true);
       setAuthMode('authenticated');
     } catch (error) {
@@ -592,16 +615,17 @@ export default function App() {
 
     const checkSession = async () => {
       try {
-        const user = await fetchCurrentUser();
+        const identity = await fetchCurrentIdentity();
         if (cancelled) return;
 
-        if (!user) {
+        if (!identity) {
           resetAuthenticatedView();
           setAuthMode('login');
           return;
         }
 
-        setAuthUser(user);
+        setAuthUser(identity.user);
+        setAuthPlayer(identity.player);
       } catch (error) {
         // A temporary network/backend failure should not destroy the local UI.
         console.error('Session check failed', error);
@@ -614,7 +638,7 @@ export default function App() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [authMode, fetchCurrentUser, resetAuthenticatedView]);
+  }, [authMode, fetchCurrentIdentity, resetAuthenticatedView]);
   const activeRewards = useMemo(() => {
     if (!config) return REWARDS;
     const enabled = new Set(config.enabledRewards ?? REWARDS.map(r => r.id));
@@ -653,9 +677,13 @@ export default function App() {
   }, []);
 
   const requireAdmin = useCallback((action) => {
+    if (!isParent) {
+      showToast('Parent account required.');
+      return;
+    }
     if (!config?.adminPin || adminUnlocked) { action(); return; }
     setPinPrompt({ onSuccess: () => { sessionStorage.setItem('adminUnlocked', '1'); setAdminUnlocked(true); setPinPrompt(null); action(); } });
-  }, [config?.adminPin, adminUnlocked]);
+  }, [config?.adminPin, adminUnlocked, isParent, showToast]);
 
   useEffect(() => {
     if (!config?.adminPin) { sessionStorage.removeItem('adminUnlocked'); setAdminUnlocked(false); }
@@ -1327,10 +1355,16 @@ export default function App() {
       throw new Error('Questboard configuration was saved, but the initial game state could not be saved.');
     }
 
+    const identity = await fetchCurrentIdentity();
+    if (identity) {
+      setAuthUser(identity.user);
+      setAuthPlayer(identity.player);
+    }
+
     setConfig(wizardConfig);
     setServerState(after);
     setNeedsSetup(false);
-  }, []);
+  }, [fetchCurrentIdentity]);
 
   const handleEditComplete = useCallback(async (wizardConfig) => {
     const newIds = new Set(wizardConfig.players.map(p => p.id));
@@ -1452,7 +1486,7 @@ export default function App() {
     );
   }
 
-  if (showSettings) {
+  if (showSettings && isParent) {
     return (
       <>
         {(config?.animatedBg !== false) && <DungeonBackground />}
@@ -1530,20 +1564,28 @@ export default function App() {
                 <button onClick={() => { const next = !muted; setMuted(next); setMutedState(next); }}>
                   {muted ? '\ud83d\udd07' : '\ud83d\udd0a'} {muted ? 'Unmute' : 'Mute'}
                 </button>
-                <button onClick={() => { setMenuOpen(false); requireAdmin(() => setShowSettings(true)); }}><TileSprite tile={65} display={14} /> Settings</button>
-                <button onClick={() => { setMenuOpen(false); requireAdmin(resetWeek); }}><TileSprite tile={56} display={14} /> Reset week</button>
-                <button onClick={() => { setMenuOpen(false); exportSave(); }}><TileSprite tile={91} display={14} /> Export Save</button>
-                <button onClick={() => { setMenuOpen(false); requireAdmin(importSave); }}><TileSprite tile={89} display={14} /> Import Save</button>
+                {isParent && (
+                  <>
+                    <button onClick={() => { setMenuOpen(false); requireAdmin(() => setShowSettings(true)); }}><TileSprite tile={65} display={14} /> Settings</button>
+                    <button onClick={() => { setMenuOpen(false); requireAdmin(resetWeek); }}><TileSprite tile={56} display={14} /> Reset week</button>
+                    <button onClick={() => { setMenuOpen(false); exportSave(); }}><TileSprite tile={91} display={14} /> Export Save</button>
+                    <button onClick={() => { setMenuOpen(false); requireAdmin(importSave); }}><TileSprite tile={89} display={14} /> Import Save</button>
+                  </>
+                )}
               </div>
             )}
           </div>
         ) : (
           <>
             <button className="mute-btn" onClick={() => { const next = !muted; setMuted(next); setMutedState(next); }} title={muted ? 'Unmute sounds' : 'Mute sounds'}>{muted ? '\ud83d\udd07' : '\ud83d\udd0a'}</button>
-            <button className="reset-btn" onClick={() => requireAdmin(() => setShowSettings(true))}><TileSprite tile={65} display={12} /> Settings</button>
-            <button className="reset-btn" onClick={() => requireAdmin(resetWeek)}><TileSprite tile={56} display={12} /> Reset week</button>
-            <button className="reset-btn" onClick={exportSave}><TileSprite tile={91} display={12} /> Export Save</button>
-            <button className="reset-btn" onClick={() => requireAdmin(importSave)}><TileSprite tile={89} display={12} /> Import Save</button>
+            {isParent && (
+              <>
+                <button className="reset-btn" onClick={() => requireAdmin(() => setShowSettings(true))}><TileSprite tile={65} display={12} /> Settings</button>
+                <button className="reset-btn" onClick={() => requireAdmin(resetWeek)}><TileSprite tile={56} display={12} /> Reset week</button>
+                <button className="reset-btn" onClick={exportSave}><TileSprite tile={91} display={12} /> Export Save</button>
+                <button className="reset-btn" onClick={() => requireAdmin(importSave)}><TileSprite tile={89} display={12} /> Import Save</button>
+              </>
+            )}
           </>
         )}
       </div>
@@ -1556,24 +1598,28 @@ export default function App() {
             gold={state.gold[p.id] || 0}
             xp={state.xp?.[p.id] || 0}
             isSelected={selected === p.id}
-            onClick={myPlayerId ? () => setSelected(p.id) : () => selectPlayer(p.id)}
+            onClick={
+              isParent
+                ? (myPlayerId ? () => setSelected(p.id) : () => selectPlayer(p.id))
+                : (p.id === linkedPlayerId ? () => setSelected(p.id) : undefined)
+            }
             playerDamage={state.monsterDamage?.[p.id]}
             lastHit={lastHits[p.id]}
             streak={state.streaks?.[p.id] || 0}
             prestige={state.prestige?.[p.id] || 0}
             badges={state.badges?.[p.id] || []}
             selectedTitleBadge={state.selectedTitles?.[p.id]}
-            onSelectTitle={handleSelectTitle}
+            onSelectTitle={isParent || p.id === linkedPlayerId ? handleSelectTitle : undefined}
             activePowerUps={getActivePowerUps(state.activePowerUps, p.id)}
             overkillCharge={state.overkillCharge?.[p.id] || 0}
             storedPowerTokens={state.storedPowerTokens?.[p.id] || 0}
             projectedOverkillRewardId={getProjectedOverkillReward(p.id)}
-            onPrestige={handlePrestige}
-            onSetMe={myPlayerId ? undefined : () => setMyPlayer(p.id)}
+            onPrestige={isParent || p.id === linkedPlayerId ? handlePrestige : undefined}
+            onSetMe={isParent && !myPlayerId ? () => setMyPlayer(p.id) : undefined}
           />
         ))}
       </div>
-      {myPlayerId && (
+      {myPlayerId && isParent && (
         <div className="focus-mode-bar">
           <button className="focus-mode-switch" onClick={clearMyPlayer}>⇄ Switch player</button>
         </div>
@@ -1641,7 +1687,7 @@ export default function App() {
     <div className="version-label">v{__APP_VERSION__}</div>
     {celebration && <Celebration onDismiss={() => setCelebration(false)} />}
     </div>
-    {pinPrompt && <PinModal adminPin={config.adminPin} onSuccess={pinPrompt.onSuccess} onCancel={() => setPinPrompt(null)} />}
+    {isParent && pinPrompt && <PinModal adminPin={config.adminPin} onSuccess={pinPrompt.onSuccess} onCancel={() => setPinPrompt(null)} />}
     </>
   );
 }

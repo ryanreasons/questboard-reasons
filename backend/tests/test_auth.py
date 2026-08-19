@@ -8,6 +8,7 @@ from fastapi import HTTPException, Response
 from fastapi.testclient import TestClient
 
 from backend import auth
+from backend import main as main_module
 from backend.auth import BootstrapRequest, utc_now, utc_text
 from backend.database import connect, initialize_database
 from backend.main import app
@@ -24,6 +25,8 @@ def auth_client(tmp_path, monkeypatch):
     monkeypatch.setenv("QUESTBOARD_DATA", str(tmp_path))
     monkeypatch.setenv("QUESTBOARD_SECURE_COOKIES", "false")
     monkeypatch.setenv("QUESTBOARD_SESSION_HOURS", "24")
+    monkeypatch.setattr(main_module, "STATE_FILE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(main_module, "CONFIG_FILE", str(tmp_path / "config.json"))
 
     with TestClient(app) as client:
         yield client, db_path
@@ -515,3 +518,45 @@ def test_setup_party_is_one_time_and_requires_parent(auth_client):
 
     denied = parent_client.post("/auth/setup-party", json=payload)
     assert denied.status_code == 403
+
+def test_legacy_state_and_config_require_login_and_parent_config_write(auth_client):
+    client, _ = auth_client
+
+    assert client.get("/state").status_code == 401
+    assert client.post("/state", json={"x": 1}).status_code == 401
+    assert client.get("/config").status_code == 401
+    assert client.post("/config", json={"players": []}).status_code == 401
+
+    bootstrap_parent(client, "parent")
+
+    assert client.get("/state").status_code == 200
+    assert client.post("/state", json={"hello": "world"}).status_code == 200
+    assert client.get("/state").json() == {"hello": "world"}
+
+    parent_config = {"players": [{"id": "player_0", "name": "Parent"}]}
+    assert client.post("/config", json=parent_config).status_code == 200
+    assert client.get("/config").json() == parent_config
+
+    child = client.post(
+        "/auth/users",
+        json={
+            "username": "child.access",
+            "password": CHILD_PASSWORD,
+            "role": "child",
+        },
+    )
+    assert child.status_code == 201
+
+    client.post("/auth/logout")
+    login = client.post(
+        "/auth/login",
+        json={"username": "child.access", "password": CHILD_PASSWORD},
+    )
+    assert login.status_code == 200
+
+    # Child sessions can read the shared board and use the transitional state
+    # compatibility route, but cannot change family configuration.
+    assert client.get("/state").status_code == 200
+    assert client.get("/config").status_code == 200
+    assert client.post("/state", json={"child": "allowed-for-now"}).status_code == 200
+    assert client.post("/config", json={"tampered": True}).status_code == 403

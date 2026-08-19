@@ -1493,6 +1493,7 @@ export default function App() {
         <Suspense fallback={null}>
           <SetupWizard
             initialConfig={config}
+            currentUser={authUser}
             onComplete={handleEditComplete}
             onCancel={() => setShowSettings(false)}
           />

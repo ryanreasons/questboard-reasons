@@ -30,3 +30,26 @@ For the current household deployment, the UI identity binding provides the
 practical child boundary while preserving the existing game. A later hardening
 slice can replace whole-state child mutation with explicit server-side action
 endpoints if desired.
+## Family account management
+
+The parent Settings UI includes an Accounts tab backed by a parent-only
+`GET /auth/accounts` endpoint. The endpoint returns public account metadata and
+the linked Questboard hero; it never returns password hashes or session tokens.
+
+From the Accounts tab, a signed-in parent can:
+
+- view each login, role, active/disabled status, and linked hero;
+- reset another family member's password;
+- disable or re-enable another family member's account.
+
+Password resets use the existing Argon2 password policy and revoke all sessions
+for the target account. Disabling an account also revokes its active sessions.
+The backend continues to prevent disabling the last active parent.
+
+The currently signed-in parent is intentionally not reset or disabled from this
+panel to avoid accidentally destroying the session being used to administer the
+family. Another active parent can manage that account if needed.
+
+Account deletion and Parent/Child role changes are intentionally deferred.
+Disabling preserves player history and avoids introducing destructive identity
+semantics before Gold ledger and historical-domain migrations are complete.

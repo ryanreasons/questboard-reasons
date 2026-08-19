@@ -496,6 +496,49 @@ def me(user: AuthUser = Depends(get_current_user)):
     }
 
 
+@router.get("/accounts")
+def list_accounts(current_user: AuthUser = Depends(require_parent)):
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                u.id,
+                u.username,
+                u.role,
+                u.is_active,
+                u.created_at,
+                u.updated_at,
+                u.last_login_at,
+                p.id AS player_row_id,
+                p.questboard_player_id,
+                p.display_name
+            FROM users u
+            LEFT JOIN players p ON p.user_id = u.id
+            ORDER BY u.created_at, u.username
+            """
+        ).fetchall()
+
+    accounts = []
+    for row in rows:
+        player = None
+        if row["player_row_id"] is not None:
+            player = {
+                "id": row["player_row_id"],
+                "questboard_player_id": row["questboard_player_id"],
+                "display_name": row["display_name"],
+            }
+
+        accounts.append(
+            {
+                "user": _public_user(row),
+                "player": player,
+                "is_self": row["id"] == current_user.id,
+            }
+        )
+
+    return {"accounts": accounts}
+
+
 @router.get("/users")
 def list_users(_: AuthUser = Depends(require_parent)):
     with connect() as conn:

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ALL_CHORES, REWARDS, POWER_UPS, DEFAULT_POWER_UP_SETTINGS, TRIGGER_TYPES, DURATION_OPTIONS, CLASSES } from '../data';
 import { dateKeyToInputValue, inputValueToDateKey } from '../logic';
 import TileSprite from './TileSprite';
@@ -35,8 +35,8 @@ const REWARD_TIERS = [
   { label: 'DREAM', max: 999 },
 ];
 
-const TABS = ['party', 'quests', 'rewards', 'powerups', 'display'];
-const TAB_LABELS = { party: 'Party', quests: 'Quests', rewards: 'Rewards', powerups: 'Power-Ups', display: 'Display' };
+const TABS = ['party', 'accounts', 'quests', 'rewards', 'powerups', 'display'];
+const TAB_LABELS = { party: 'Party', accounts: 'Accounts', quests: 'Quests', rewards: 'Rewards', powerups: 'Power-Ups', display: 'Display' };
 
 const UI_SCALES = [
   { id: 'mini',   label: 'Mini',   desc: '100%' },
@@ -944,6 +944,336 @@ function TabPowerUps({ powerUpSettings, onChange }) {
   );
 }
 
+// ── Edit tab: Family Accounts ─────────────────────────────────────────────────
+function accountApiError(payload, fallback) {
+  const detail = payload?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map(item => item?.msg).filter(Boolean);
+    if (messages.length) return messages.join('; ');
+  }
+  return fallback;
+}
+
+function TabAccounts({ currentUser }) {
+  const [accounts, setAccounts] = useState([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [accountError, setAccountError] = useState('');
+  const [accountMessage, setAccountMessage] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [resettingId, setResettingId] = useState(null);
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [confirmDraft, setConfirmDraft] = useState('');
+
+  async function loadAccounts() {
+    setLoadingAccounts(true);
+    setAccountError('');
+
+    try {
+      const response = await fetch('/api/auth/accounts', {
+        credentials: 'same-origin',
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(accountApiError(payload, 'Could not load family accounts.'));
+      }
+
+      setAccounts(payload.accounts || []);
+    } catch (error) {
+      setAccountError(error?.message || 'Could not load family accounts.');
+    } finally {
+      setLoadingAccounts(false);
+    }
+  }
+
+  useEffect(() => {
+    loadAccounts();
+  }, []);
+
+  function openReset(userId) {
+    setResettingId(userId);
+    setPasswordDraft('');
+    setConfirmDraft('');
+    setAccountError('');
+    setAccountMessage('');
+  }
+
+  function cancelReset() {
+    setResettingId(null);
+    setPasswordDraft('');
+    setConfirmDraft('');
+  }
+
+  async function resetPassword(account) {
+    if (!passwordDraft) {
+      setAccountError('Enter a new password or passphrase.');
+      return;
+    }
+    if (passwordDraft !== confirmDraft) {
+      setAccountError('The passwords do not match.');
+      return;
+    }
+
+    setBusyId(account.user.id);
+    setAccountError('');
+    setAccountMessage('');
+
+    try {
+      const response = await fetch(
+        `/api/auth/users/${encodeURIComponent(account.user.id)}/reset-password`,
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: passwordDraft }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(accountApiError(payload, 'Could not reset the password.'));
+      }
+
+      setAccountMessage(`Password reset for @${account.user.username}. Existing sessions for that account were signed out.`);
+      cancelReset();
+    } catch (error) {
+      setAccountError(error?.message || 'Could not reset the password.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function toggleActive(account) {
+    const nextActive = !account.user.is_active;
+    const action = nextActive ? 'enable' : 'disable';
+
+    if (!confirm(`${action === 'disable' ? 'Disable' : 'Enable'} @${account.user.username}?`)) {
+      return;
+    }
+
+    setBusyId(account.user.id);
+    setAccountError('');
+    setAccountMessage('');
+
+    try {
+      const response = await fetch(
+        `/api/auth/users/${encodeURIComponent(account.user.id)}/active`,
+        {
+          method: 'PATCH',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_active: nextActive }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(accountApiError(payload, `Could not ${action} the account.`));
+      }
+
+      setAccountMessage(`@${account.user.username} is now ${nextActive ? 'active' : 'disabled'}.`);
+      await loadAccounts();
+    } catch (error) {
+      setAccountError(error?.message || `Could not ${action} the account.`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div>
+      <div style={S.h2}>Family Accounts</div>
+      <p style={S.p}>
+        Manage family logins and their linked heroes. Passwords are never displayed.
+        Account changes on this tab save immediately.
+      </p>
+
+      {accountError && (
+        <div style={{
+          background: '#301818',
+          border: '1px solid #8a3a3a',
+          color: '#e0a0a0',
+          padding: 10,
+          fontSize: 11,
+          marginBottom: 12,
+        }}>
+          {accountError}
+        </div>
+      )}
+
+      {accountMessage && (
+        <div style={{
+          background: '#183018',
+          border: '1px solid #3a7a3a',
+          color: '#9fd49f',
+          padding: 10,
+          fontSize: 11,
+          marginBottom: 12,
+        }}>
+          {accountMessage}
+        </div>
+      )}
+
+      {loadingAccounts ? (
+        <div style={{ color: '#7a7a9a', fontSize: 12, padding: '20px 0' }}>
+          Loading family accounts…
+        </div>
+      ) : (
+        accounts.map(account => {
+          const user = account.user;
+          const player = account.player;
+          const isSelf = account.is_self || user.id === currentUser?.id;
+          const isBusy = busyId === user.id;
+          const resetting = resettingId === user.id;
+
+          return (
+            <div
+              key={user.id}
+              style={{
+                padding: '14px 0',
+                borderBottom: '1px solid #242446',
+              }}
+            >
+              <div style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                marginBottom: 10,
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    color: '#c8d0e0',
+                    fontSize: 14,
+                    fontWeight: 'bold',
+                    marginBottom: 3,
+                  }}>
+                    {player?.display_name || user.username}
+                    {isSelf && (
+                      <span style={{ color: '#8dc447', fontSize: 10, marginLeft: 7 }}>
+                        YOU
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ color: '#8a8aaa', fontSize: 11 }}>
+                    @{user.username}
+                  </div>
+                  <div style={{ color: '#666688', fontSize: 10, marginTop: 4 }}>
+                    {user.role === 'parent' ? 'Parent' : 'Child'}
+                    {' · '}
+                    {user.is_active ? 'Active' : 'Disabled'}
+                    {player?.questboard_player_id
+                      ? ` · Hero ${player.questboard_player_id}`
+                      : ' · No hero linked'}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    padding: '3px 7px',
+                    border: `1px solid ${user.is_active ? '#3a6a3a' : '#6a3a3a'}`,
+                    color: user.is_active ? '#8dc447' : '#c08080',
+                    fontSize: 9,
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  {user.is_active ? 'ACTIVE' : 'DISABLED'}
+                </div>
+              </div>
+
+              {resetting ? (
+                <div style={{
+                  background: '#0d0d20',
+                  border: '1px solid #30305a',
+                  padding: 10,
+                  marginTop: 8,
+                }}>
+                  <div style={{ ...S.label, marginBottom: 8 }}>
+                    NEW PASSWORD FOR @{user.username}
+                  </div>
+                  <input
+                    type="password"
+                    style={{ ...S.input, marginBottom: 8 }}
+                    value={passwordDraft}
+                    maxLength={256}
+                    autoComplete="new-password"
+                    placeholder="New password or passphrase"
+                    onChange={e => setPasswordDraft(e.target.value)}
+                  />
+                  <input
+                    type="password"
+                    style={{ ...S.input, marginBottom: 8 }}
+                    value={confirmDraft}
+                    maxLength={256}
+                    autoComplete="new-password"
+                    placeholder="Confirm new password"
+                    onChange={e => setConfirmDraft(e.target.value)}
+                  />
+                  <div style={{ color: '#666688', fontSize: 9, marginBottom: 8 }}>
+                    Minimum 15 characters. Resetting a password signs that account out everywhere.
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      style={{ ...S.btnPrimary, flex: 1 }}
+                      disabled={isBusy}
+                      onClick={() => resetPassword(account)}
+                    >
+                      {isBusy ? 'Resetting…' : 'Reset Password'}
+                    </button>
+                    <button
+                      style={{ ...S.btn, flex: 1 }}
+                      disabled={isBusy}
+                      onClick={cancelReset}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {!isSelf && (
+                    <button
+                      style={{ ...S.btn, flex: '1 1 150px' }}
+                      disabled={isBusy}
+                      onClick={() => openReset(user.id)}
+                    >
+                      Reset Password
+                    </button>
+                  )}
+
+                  {!isSelf && (
+                    <button
+                      style={{
+                        ...(user.is_active ? S.btnDanger : S.btnPrimary),
+                        flex: '1 1 150px',
+                      }}
+                      disabled={isBusy}
+                      onClick={() => toggleActive(account)}
+                    >
+                      {isBusy
+                        ? 'Working…'
+                        : user.is_active
+                          ? 'Disable Account'
+                          : 'Enable Account'}
+                    </button>
+                  )}
+
+                  {isSelf && (
+                    <div style={{ color: '#666688', fontSize: 10, lineHeight: 1.5 }}>
+                      Your signed-in account cannot be disabled or reset from this panel.
+                      Another active parent can manage it.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
 // ── Edit tab: Display ─────────────────────────────────────────────────────────
 function TabDisplay({ crtEnabled, onToggleCrt, uiScale, onChangeUiScale, animatedBg, onToggleAnimatedBg, weekStartDay, onChangeWeekStartDay, confirmChores, onToggleConfirmChores, displayOrientation, onChangeDisplayOrientation, vacation, onChangeVacation, adminPin, onChangeAdminPin }) {
   const vac = vacation ?? { enabled: false, start: '', end: '' };
@@ -1366,6 +1696,8 @@ export default function SetupWizard({ onComplete, onCancel, initialConfig, curre
                 onAddPlayer={() => setPlayers(prev => [...prev, makeNewPlayer(prev)])}
                 onRemovePlayer={idx => setPlayers(prev => prev.filter((_, i) => i !== idx))}
               />
+            ) : activeTab === 'accounts' ? (
+              <TabAccounts currentUser={currentUser} />
             ) : activeTab === 'quests' ? (
               <ChoreSection
                 players={players}

@@ -560,3 +560,57 @@ def test_legacy_state_and_config_require_login_and_parent_config_write(auth_clie
     assert client.get("/config").status_code == 200
     assert client.post("/state", json={"child": "allowed-for-now"}).status_code == 200
     assert client.post("/config", json={"tampered": True}).status_code == 403
+
+def test_parent_account_listing_includes_player_links_and_denies_child(auth_client):
+    client, _ = auth_client
+    bootstrap_parent(client, "parent")
+
+    setup = client.post(
+        "/auth/setup-party",
+        json={
+            "players": [
+                {
+                    "questboard_player_id": "player_0",
+                    "display_name": "Parent Hero",
+                    "use_current_user": True,
+                },
+                {
+                    "questboard_player_id": "player_1",
+                    "display_name": "Child Hero",
+                    "username": "child.accounts",
+                    "password": CHILD_PASSWORD,
+                    "role": "child",
+                },
+            ]
+        },
+    )
+    assert setup.status_code == 201, setup.text
+
+    accounts = client.get("/auth/accounts")
+    assert accounts.status_code == 200
+    body = accounts.json()["accounts"]
+    assert len(body) == 2
+
+    parent = next(a for a in body if a["user"]["username"] == "parent")
+    child = next(a for a in body if a["user"]["username"] == "child.accounts")
+
+    assert parent["is_self"] is True
+    assert parent["player"]["questboard_player_id"] == "player_0"
+    assert parent["player"]["display_name"] == "Parent Hero"
+
+    assert child["is_self"] is False
+    assert child["user"]["role"] == "child"
+    assert child["player"]["questboard_player_id"] == "player_1"
+    assert child["player"]["display_name"] == "Child Hero"
+
+    serialized = accounts.text
+    assert "password_hash" not in serialized
+    assert "token_hash" not in serialized
+
+    client.post("/auth/logout")
+    login = client.post(
+        "/auth/login",
+        json={"username": "child.accounts", "password": CHILD_PASSWORD},
+    )
+    assert login.status_code == 200
+    assert client.get("/auth/accounts").status_code == 403

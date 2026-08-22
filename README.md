@@ -1,6 +1,10 @@
-# Questboard
+# Questboard — Reasons Family Adaptation
 
-> Turn household chores into a pixel art RPG adventure for the whole family.
+> A family-specific adaptation of the upstream [Questboard](https://github.com/thillygooth/questboard) project, customized for our household use.
+
+The original project was created by **thillygooth**. This repository keeps the upstream licensing and attribution intact and reflects the version I adapted for my own family's chore/reward setup.
+
+Questboard turns household chores into a pixel art RPG adventure for the whole family.
 
 Each family member picks a hero and fights a daily monster. Complete chores to deal damage, defeat it before midnight to earn gold, or it strikes back. Spend gold on rewards you've agreed on as a family.
 
@@ -123,6 +127,8 @@ Sprite assets from [OpenGameArt.org](https://opengameart.org) under CC-BY / CC0 
 ---
 
 ## Credits
+
+Original project: **[thillygooth/questboard](https://github.com/thillygooth/questboard)**.
 
 Overkill system, power-ups, solo chore mode, tabbed settings, new hero classes, and gold economy rebalancing contributed by **[TreasuryMatt](https://github.com/TreasuryMatt)**.
 
